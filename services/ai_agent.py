@@ -117,6 +117,10 @@ def enviar_mensagem(system_prompt: str, historico: list, mensagem: str) -> str:
     if "<think>" in resposta:
         resposta = re.sub(r"<think>[\s\S]*", "", resposta).strip()
 
+    # Se a resposta ficou vazia após remoção do think, gerar resposta padrão
+    if not resposta:
+        resposta = "Olá! Como posso ajudar você hoje? Descreva o problema de manutenção que você está enfrentando."
+
     return resposta
 
 

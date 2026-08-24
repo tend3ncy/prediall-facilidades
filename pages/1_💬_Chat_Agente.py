@@ -22,12 +22,9 @@ if "usuario" not in st.session_state or st.session_state.usuario is None:
 
 usuario = st.session_state.usuario
 
-# Inicializar histórico do chat
-if "mensagens_chat" not in st.session_state:
-    st.session_state.mensagens_chat = []
-
-if "historico_groq" not in st.session_state:
-    st.session_state.historico_groq = []
+# Inicializar estados
+if "messages" not in st.session_state:
+    st.session_state.messages = []
 
 if "chamado_criado" not in st.session_state:
     st.session_state.chamado_criado = False
@@ -37,14 +34,12 @@ if "system_prompt" not in st.session_state:
 
 
 def resetar_chat():
-    """Limpa o chat para uma nova conversa."""
-    st.session_state.mensagens_chat = []
-    st.session_state.historico_groq = []
+    st.session_state.messages = []
     st.session_state.chamado_criado = False
     st.session_state.system_prompt = None
 
 
-# Sidebar com informações
+# Sidebar
 with st.sidebar:
     st.markdown(f"### 👤 {usuario['nome']}")
     st.caption(f"🏢 {usuario['unidade']}")
@@ -61,36 +56,33 @@ with st.sidebar:
         resetar_chat()
         st.rerun()
 
+# Mensagem inicial
+if not st.session_state.messages:
+    saudacao = f"Olá, {usuario['nome'].split()[0]}! 👋 Sou o assistente de Facilities. Como posso ajudar você hoje? Descreva o problema que você está enfrentando."
+    st.session_state.messages.append({"role": "assistant", "content": saudacao})
 
-# Exibir mensagens do histórico
-for msg in st.session_state.mensagens_chat:
+# Exibir todas as mensagens do histórico
+for msg in st.session_state.messages:
     with st.chat_message(msg["role"], avatar="🧑" if msg["role"] == "user" else "🤖"):
         st.markdown(msg["content"])
 
-# Mensagem inicial do agente
-if not st.session_state.mensagens_chat:
-    saudacao = f"Olá, {usuario['nome'].split()[0]}! 👋 Sou o assistente de Facilities. Como posso ajudar você hoje? Descreva o problema que você está enfrentando."
-    st.session_state.mensagens_chat.append({"role": "assistant", "content": saudacao})
-    with st.chat_message("assistant", avatar="🤖"):
-        st.markdown(saudacao)
-
-# Se chamado já foi criado, mostrar mensagem de sucesso
+# Se chamado já foi criado
 if st.session_state.chamado_criado:
-    st.success("✅ Chamado registrado com sucesso! Use o menu lateral para iniciar uma nova conversa.")
+    st.success("✅ Chamado registrado com sucesso! Clique em 'Nova Conversa' para abrir outro.")
     st.stop()
 
 # Input do usuário
 if prompt := st.chat_input("Descreva seu problema..."):
-    # Mostrar mensagem do usuário
-    st.session_state.mensagens_chat.append({"role": "user", "content": prompt})
+    # Adicionar mensagem do usuário ao histórico
+    st.session_state.messages.append({"role": "user", "content": prompt})
     with st.chat_message("user", avatar="🧑"):
         st.markdown(prompt)
 
-    # Processar com o agente
+    # Processar resposta
     with st.chat_message("assistant", avatar="🤖"):
         with st.spinner("Analisando..."):
             try:
-                # Inicializar system prompt se necessário
+                # Criar system prompt na primeira mensagem real do usuário
                 if st.session_state.system_prompt is None:
                     contexto = buscar_contexto(prompt)
                     st.session_state.system_prompt = criar_agente(
@@ -99,28 +91,33 @@ if prompt := st.chat_input("Descreva seu problema..."):
                         contexto_rag=contexto,
                     )
 
-                # Enviar mensagem ao Groq
+                # Montar histórico para enviar ao modelo (sem a saudação inicial)
+                historico_para_modelo = []
+                for msg in st.session_state.messages[1:]:  # pula a saudação
+                    if msg["role"] in ["user", "assistant"]:
+                        historico_para_modelo.append({
+                            "role": msg["role"],
+                            "content": msg["content"]
+                        })
+
+                # Remover a última mensagem do user (será enviada separadamente)
+                historico_enviar = historico_para_modelo[:-1]
+                mensagem_atual = prompt
+
+                # Enviar ao Groq com histórico completo
                 resposta = enviar_mensagem(
                     st.session_state.system_prompt,
-                    st.session_state.historico_groq,
-                    prompt
+                    historico_enviar,
+                    mensagem_atual
                 )
 
-                # Atualizar histórico do Groq
-                st.session_state.historico_groq.append(
-                    {"role": "user", "content": prompt}
-                )
-                st.session_state.historico_groq.append(
-                    {"role": "assistant", "content": resposta}
-                )
-
-                # Verificar se é emergência
+                # Verificar emergência
                 if verificar_emergencia(resposta):
                     resposta_limpa = resposta.split('{"emergencia"')[0].strip()
+                    if not resposta_limpa:
+                        resposta_limpa = "🚨 EMERGÊNCIA DETECTADA! Saia da área imediatamente. Brigada: ramal 9999, SAMU: 192, Bombeiros: 193."
                     st.markdown(resposta_limpa)
-                    st.session_state.mensagens_chat.append(
-                        {"role": "assistant", "content": resposta_limpa}
-                    )
+                    st.session_state.messages.append({"role": "assistant", "content": resposta_limpa})
                     notificar_emergencia({
                         "unidade": usuario["unidade"],
                         "local": "Informado no chat",
@@ -129,21 +126,23 @@ if prompt := st.chat_input("Descreva seu problema..."):
                     })
                     st.error("🚨 Emergência notificada à equipe de segurança!")
 
-                # Verificar se dados estão completos
+                # Verificar se dados completos (chamado pronto)
                 elif dados := extrair_dados_chamado(resposta):
-                    # Limpar JSON da resposta para exibição
                     resposta_limpa = resposta
                     if "```json" in resposta_limpa:
                         resposta_limpa = resposta_limpa.split("```json")[0].strip()
+                    elif "```" in resposta_limpa:
+                        resposta_limpa = resposta_limpa.split("```")[0].strip()
                     elif '{"completo"' in resposta_limpa:
                         resposta_limpa = resposta_limpa.split('{"completo"')[0].strip()
 
-                    st.markdown(resposta_limpa)
-                    st.session_state.mensagens_chat.append(
-                        {"role": "assistant", "content": resposta_limpa}
-                    )
+                    if not resposta_limpa:
+                        resposta_limpa = "✅ Perfeito! Todos os dados foram coletados. Registrando seu chamado..."
 
-                    # Criar chamado no banco
+                    st.markdown(resposta_limpa)
+                    st.session_state.messages.append({"role": "assistant", "content": resposta_limpa})
+
+                    # Criar chamado
                     chamado_dados = {
                         "unidade": usuario["unidade"],
                         "local": dados.get("local", ""),
@@ -159,27 +158,19 @@ if prompt := st.chat_input("Descreva seu problema..."):
                     }
 
                     resultado = criar_chamado(chamado_dados)
-
                     if resultado:
-                        st.success(
-                            f"✅ **Chamado #{resultado['id']} criado com sucesso!**\n\n"
-                            f"Você pode acompanhar o status na página 'Meus Chamados'."
-                        )
+                        st.success(f"✅ **Chamado #{resultado['id']} criado com sucesso!**")
                         notificar_novo_chamado(resultado)
                         st.session_state.chamado_criado = True
                     else:
-                        st.error("Erro ao criar chamado. Tente novamente.")
+                        st.error("Erro ao criar chamado no banco. Tente novamente.")
 
                 else:
-                    # Resposta normal (ainda coletando dados)
+                    # Resposta normal — agente ainda coletando dados
                     st.markdown(resposta)
-                    st.session_state.mensagens_chat.append(
-                        {"role": "assistant", "content": resposta}
-                    )
+                    st.session_state.messages.append({"role": "assistant", "content": resposta})
 
             except Exception as e:
                 erro_msg = f"Desculpe, tive um problema técnico. Tente novamente ou use o formulário. Erro: {str(e)}"
                 st.error(erro_msg)
-                st.session_state.mensagens_chat.append(
-                    {"role": "assistant", "content": erro_msg}
-                )
+                st.session_state.messages.append({"role": "assistant", "content": erro_msg})

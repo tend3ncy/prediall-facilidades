@@ -183,5 +183,3 @@ if prompt := st.chat_input("Descreva seu problema..."):
                 st.session_state.mensagens_chat.append(
                     {"role": "assistant", "content": erro_msg}
                 )
-
-    st.rerun()

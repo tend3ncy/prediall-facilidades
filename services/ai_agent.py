@@ -13,12 +13,11 @@ load_dotenv()
 
 client = Groq(api_key=os.getenv("GROQ_API_KEY"))
 
-MODEL = "qwen/qwen3.6-27b"
+MODEL = "openai/gpt-oss-20b"
 
-SYSTEM_PROMPT = """/no_think
-Você é o Assistente de Facilities da empresa. Sua função é ajudar 
+SYSTEM_PROMPT = """Você é o Assistente de Facilities da empresa. Sua função é ajudar 
 colaboradores a registrar chamados de manutenção predial de forma rápida e completa.
-IMPORTANTE: Responda APENAS com a mensagem final ao usuário. NÃO inclua blocos de raciocínio ou pensamento.
+Responda SEMPRE em português brasileiro.
 
 ## Seu comportamento:
 1. Cumprimente o usuário pelo nome (fornecido abaixo)
